@@ -9,8 +9,8 @@ function createTestingController({ testingService }) {
 
   async function scheduleJobController(req, res) {
     try {
-      const { name, time, data, jobId, callback } = req.body;
-      const result = await testingService.scheduleJob({ name, time, data, jobId, callback });
+      const { name, time, data, jobId } = req.body;
+      const result = await testingService.scheduleJob({ name, time, data, jobId });
 
       return res.status(200).json({ status: true, data: result });
     } catch (error) {

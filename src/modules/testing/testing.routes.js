@@ -36,10 +36,9 @@ router.get('/health', testingController.healthController);
  *
  * Body:
  *   name     (string, required)  — registered job name
- *   time     (string, required)  — "11 AM", "3:30 PM", "14:00", ISO string
- *   data     (object, optional)  — payload for handler / callback body
+ *   time     (string, required)  — "11 AM", "3:30 PM", "25-03-2026 2 PM", "in 5m"
+ *   data     (object, optional)  — payload for handler
  *   jobId    (string, optional)  — deduplication/upsert key
- *   callback (object, optional)  — { url, method?, headers?, timeout? }
  */
 router.post('/schedule', testingController.scheduleJobController);
 

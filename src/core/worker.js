@@ -2,22 +2,15 @@
  * Worker — Processes scheduled jobs when their time arrives
  *
  * Execution flow for each job:
- *
- *   1. If job has _callback → HTTP request to callback URL with payload
- *   2. If job has a registered handler → run handler with payload + callback response
- *   3. If neither → error (job must have at least one)
- *
- * This means:
- *   - callback only    → fire-and-forget HTTP call to main backend (most common in prod)
- *   - handler only     → local processing (useful for testing or embedded use)
- *   - callback + handler → HTTP call first, then handler gets both payload & response
+ *   1. Look up the registered handler by job name
+ *   2. Run handler with payload + context
+ *   3. Return result with timing info
  *
  * Wraps everything with structured logging, timing, and error propagation.
  */
 
 const { Worker } = require('bullmq');
 const { redisConnection } = require('../config/redis.config');
-const { request: httpRequest } = require('../utils/http.utils');
 const registry = require('./registry');
 const { QUEUE_NAME } = require('./scheduler');
 
@@ -36,68 +29,23 @@ async function processJob(job) {
   console.log(`\n[worker] ▶ Processing "${name}" (id: ${id}, attempt: ${attemptsMade + 1})`);
 
   // Separate internal fields from the actual payload
-  const { _meta, _callback, ...payload } = data;
+  const { _meta, ...payload } = data;
   const context = { jobId: id, meta: _meta, attempt: attemptsMade + 1 };
 
   const jobDef = registry.get(name);
-  if (!_callback && !jobDef) {
-    throw new Error(`Job "${name}" has no callback and no registered handler. Nothing to execute.`);
+  if (!jobDef) {
+    throw new Error(`Job "${name}" has no registered handler. Nothing to execute.`);
   }
 
-  let callbackResult = null;
-  let handlerResult = null;
-
-  // ── Step 1: Execute HTTP callback (if provided) ────────────────
-  if (_callback) {
-    callbackResult = await executeCallback(_callback, payload, context);
-  }
-
-  // ── Step 2: Execute registered handler (if exists) ─────────────
-  if (jobDef) {
-    handlerResult = await jobDef.handler(payload, { ...context, callbackResult });
-  }
+  const handlerResult = await jobDef.handler(payload, context);
 
   const duration = Date.now() - startTime;
   console.log(`[worker] ✓ "${name}" completed in ${duration}ms`);
 
   return {
-    callbackResult: callbackResult ? { status: callbackResult.status, duration: callbackResult.duration } : null,
     handlerResult,
     _duration: duration,
   };
-}
-
-/**
- * Execute an HTTP callback.
- *
- * @param {object} callback          — { url, method, headers, timeout }
- * @param {object} payload           — job data (sent as JSON body)
- * @param {object} context           — { jobId, meta, attempt }
- * @returns {Promise<{ status: number, data: any, duration: number }>}
- */
-async function executeCallback(callback, payload, context) {
-  const { url, method = 'POST', headers = {}, timeout } = callback;
-
-  console.log(`[worker] → Callback: ${method} ${url}`);
-
-  const response = await httpRequest({
-    url,
-    method,
-    headers,
-    body: {
-      ...payload,
-      _schedulerMeta: {
-        jobId: context.jobId,
-        scheduledFor: context.meta?.scheduledFor,
-        firedAt: new Date().toISOString(),
-        attempt: context.attempt,
-      },
-    },
-    timeout,
-  });
-
-  console.log(`[worker] ← Callback response: ${response.status} (${response.duration}ms)`);
-  return response;
 }
 
 /**

@@ -1,6 +1,6 @@
 # Scheduler Server
 
-A standalone delayed-job scheduling service built on **BullMQ**, **Redis**, and **Express**. It accepts HTTP requests to schedule jobs at a future date/time (in IST), persists them in Redis, and executes them when the time arrives — either by calling an HTTP callback, running a local handler, or both.
+A standalone delayed-job scheduling service built on **BullMQ**, **Redis**, and **Express**. It accepts HTTP requests to schedule jobs at a future date/time (in IST), persists them in Redis, and executes registered handlers when the time arrives.
 
 Built for the EGL backend to handle time-sensitive operations like block go-lives, match starts, and notification triggers.
 
@@ -22,8 +22,7 @@ Built for the EGL backend to handle time-sensitive operations like block go-live
                          │                                            │         │
                          │   Worker ◄─────────────────────────────────┘         │
                          │     │                                                │
-                         │     ├── HTTP callback ──► Main Backend API           │
-                         │     └── Local handler ──► Registered job function    │
+                         │     └── Registered job handler runs                  │
                          │                                                      │
                          └──────────────────────────────────────────────────────┘
 ```
@@ -31,7 +30,7 @@ Built for the EGL backend to handle time-sensitive operations like block go-live
 ### Request Flow (Scheduling)
 
 ```
-POST /schedule { name, time, data, jobId, callback }
+POST /schedule { name, time, data, jobId }
   │
   ├─ testing.routes.js        Route definition
   ├─ testing.controller.js    Extract & validate request body
@@ -46,14 +45,9 @@ POST /schedule { name, time, data, jobId, callback }
 ```
 BullMQ delay expires → Worker picks up job
   │
-  ├─ Step 1: If _callback exists
-  │    └─ HTTP POST to callback URL with payload + scheduler metadata
-  │
-  └─ Step 2: If registered handler exists
-       └─ Run handler(payload, context) where context includes callback result
+  └─ Look up registered handler by job name
+       └─ Run handler(payload, context)
 ```
-
-A job can have a callback, a handler, or both. If both, the callback runs first and its result is passed to the handler.
 
 ---
 
@@ -66,7 +60,7 @@ src/
 │   └── redis.config.js              Redis connection (single source of truth)
 ├── core/
 │   ├── scheduler.js                 Queue API: schedule, cancel, list, recover
-│   ├── worker.js                    Job processor: callbacks + handlers
+│   ├── worker.js                    Job processor
 │   └── registry.js                  Job type registry (name → handler map)
 ├── jobs/
 │   ├── index.js                     Auto-loader: scans *.job.js and registers
@@ -77,8 +71,7 @@ src/
 │       ├── testing.controller.js    Request/response handling
 │       └── testing.service.js       Business logic layer
 └── utils/
-    ├── time.utils.js                IST time parsing & formatting
-    └── http.utils.js                Zero-dependency HTTP client for callbacks
+    └── time.utils.js                IST time parsing & formatting
 ```
 
 ### Layer Responsibilities
@@ -89,7 +82,7 @@ src/
 | **Controller** | `testing.controller.js` | Extract request params, format response, catch errors |
 | **Service** | `testing.service.js` | Validate business rules, delegate to core |
 | **Core** | `scheduler.js`, `worker.js`, `registry.js` | Queue management, job processing, handler registry |
-| **Utils** | `time.utils.js`, `http.utils.js` | Time parsing (IST), HTTP callback execution |
+| **Utils** | `time.utils.js` | Time parsing (IST) and formatting |
 | **Jobs** | `jobs/*.job.js` | Individual job handlers (auto-loaded) |
 
 ---
@@ -115,13 +108,9 @@ Supported `time` formats:
 
 When scheduling with a `jobId`, if a job with that ID already exists (in any state — delayed, waiting, completed, or failed), the old job is removed and replaced with the new one. This allows rescheduling without manual cancellation.
 
-### Dual Execution Model
+### Auto-Loading Job Handlers
 
-Jobs support two execution modes that can be used independently or together:
-
-- **HTTP Callback** — When the job fires, the worker sends an HTTP request to the configured URL with the job payload. This is the primary mode for production: the scheduler calls back into the main backend to trigger business logic.
-- **Local Handler** — A registered function runs inside the scheduler process. Useful for testing, lightweight tasks, or processing that doesn't need the main backend.
-- **Both** — Callback runs first, then the handler receives both the original payload and the callback response.
+Drop a `*.job.js` file in `src/jobs/` and it gets registered automatically on startup. No wiring code needed.
 
 ### Crash Recovery
 
@@ -131,10 +120,6 @@ On startup, the server scans all delayed jobs in Redis. Any job whose scheduled 
 [scheduler] Recovery: promoted "block:go-live" (block-123) — was due 25 Mar 2026, 2:11 pm IST, missed by 4m 30s
 [scheduler] Recovery complete: 1 missed job(s) promoted for immediate processing.
 ```
-
-### Auto-Loading Job Handlers
-
-Drop a `*.job.js` file in `src/jobs/` and it gets registered automatically on startup. No wiring code needed.
 
 ### Retry & Backoff
 
@@ -159,13 +144,7 @@ Schedule a delayed job.
   "name": "test",
   "time": "25-03-2026 3:30 PM",
   "data": { "userId": "123", "action": "notify" },
-  "jobId": "notif-123",
-  "callback": {
-    "url": "http://localhost:3000/internal/webhook",
-    "method": "POST",
-    "headers": { "x-api-key": "secret" },
-    "timeout": 5000
-  }
+  "jobId": "notif-123"
 }
 ```
 
@@ -173,13 +152,8 @@ Schedule a delayed job.
 |---|---|---|---|
 | `name` | string | Yes | Registered job type name |
 | `time` | string | Yes | When to fire (IST) — see formats above |
-| `data` | object | No | Payload passed to handler / callback body |
+| `data` | object | No | Payload passed to the job handler |
 | `jobId` | string | No | Custom ID for deduplication/upsert |
-| `callback` | object | No | HTTP callback config |
-| `callback.url` | string | Yes (if callback) | URL to call when job fires |
-| `callback.method` | string | No | HTTP method (default: `POST`) |
-| `callback.headers` | object | No | Extra headers |
-| `callback.timeout` | number | No | Timeout in ms (default: `10000`) |
 
 **Response:**
 
@@ -193,8 +167,7 @@ Schedule a delayed job.
     "scheduledForIST": "25 Mar 2026, 3:30 pm IST",
     "delay": "2h 15m",
     "delayMs": 8100000,
-    "replaced": false,
-    "hasCallback": true
+    "replaced": false
   }
 }
 ```
@@ -209,7 +182,7 @@ List all pending (delayed + waiting) jobs.
 {
   "status": true,
   "data": {
-    "count": 2,
+    "count": 1,
     "jobs": [
       {
         "id": "notif-123",
@@ -267,7 +240,7 @@ module.exports = {
 
   handler: async (payload, context) => {
     // payload  = the data you sent when scheduling
-    // context  = { jobId, meta, attempt, callbackResult }
+    // context  = { jobId, meta, attempt }
 
     console.log(`Block ${payload.blockId} is going live!`);
     return { success: true };
@@ -282,27 +255,6 @@ module.exports = {
 ```
 
 Restart the server. The job is auto-registered and available via `POST /schedule` with `"name": "block:go-live"`.
-
----
-
-## Callback Payload
-
-When a job with a callback fires, the worker sends this to the callback URL:
-
-```json
-{
-  "userId": "123",
-  "action": "notify",
-  "_schedulerMeta": {
-    "jobId": "notif-123",
-    "scheduledFor": "2026-03-25T10:00:00.000Z",
-    "firedAt": "2026-03-25T10:00:01.234Z",
-    "attempt": 1
-  }
-}
-```
-
-The `_schedulerMeta` field is injected by the worker so the receiving endpoint knows which scheduled job triggered the request.
 
 ---
 

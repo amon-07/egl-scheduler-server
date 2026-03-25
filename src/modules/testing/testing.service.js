@@ -11,22 +11,20 @@ const registry = require('../../core/registry');
 function createTestingService() {
 
   /**
-   * Schedule a delayed job with optional callback.
+   * Schedule a delayed job.
    *
    * @param {object} params
    * @param {string} params.name       — registered job name
    * @param {string|number} params.time — when to fire
    * @param {object} [params.data]     — payload
    * @param {string} [params.jobId]    — dedup/upsert key
-   * @param {object} [params.callback] — { url, method?, headers?, timeout? }
    * @returns {Promise<object>}
    */
-  async function scheduleJob({ name, time, data = {}, jobId, callback }) {
+  async function scheduleJob({ name, time, data = {}, jobId }) {
     if (!name) throw { status: 400, message: 'name is required' };
     if (!time) throw { status: 400, message: 'time is required. e.g. "11 AM", "25-03-2026 3:30 PM", "in 5m"' };
-    if (callback && !callback.url) throw { status: 400, message: 'callback.url is required when callback is provided' };
 
-    return scheduler.schedule(name, data, time, { jobId, callback });
+    return scheduler.schedule(name, data, time, { jobId });
   }
 
   /**

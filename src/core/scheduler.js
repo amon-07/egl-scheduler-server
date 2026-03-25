@@ -42,11 +42,6 @@ const queue = new Queue(QUEUE_NAME, {
  * @param {string|number} runAt    — when to fire: "11 AM", "3:30 PM", ISO string, Unix ms
  * @param {object} [opts]          — optional overrides
  * @param {string} [opts.jobId]    — custom job ID for deduplication/upsert (recommended)
- * @param {object} [opts.callback] — HTTP callback config for when job fires
- * @param {string} opts.callback.url     — URL to call (e.g. "http://localhost:3000/internal/block/go-live")
- * @param {string} [opts.callback.method] — HTTP method (default: "POST")
- * @param {object} [opts.callback.headers] — extra headers (e.g. { "x-api-key": "..." })
- * @param {number} [opts.callback.timeout] — timeout in ms (default: 10000)
  * @returns {Promise<object>}      — { jobId, name, scheduledFor, delay, delayMs, replaced }
  */
 async function schedule(name, data, runAt, opts = {}) {
@@ -84,8 +79,6 @@ async function schedule(name, data, runAt, opts = {}) {
       scheduledFor: targetDate.toISOString(),
       scheduledAt: new Date().toISOString(),
     },
-    // Store callback config — worker reads this when job fires
-    ...(opts.callback ? { _callback: opts.callback } : {}),
   }, jobOptions);
 
   // Verify job was actually added
@@ -100,10 +93,9 @@ async function schedule(name, data, runAt, opts = {}) {
     delay: formatDelay(delayMs),
     delayMs,
     replaced,
-    hasCallback: !!opts.callback,
   };
 
-  console.log(`[scheduler] ${replaced ? 'Rescheduled' : 'Scheduled'} "${name}" → fires at ${result.scheduledForIST} (in ${result.delay})${opts.callback ? ` → callback: ${opts.callback.method || 'POST'} ${opts.callback.url}` : ''}`);
+  console.log(`[scheduler] ${replaced ? 'Rescheduled' : 'Scheduled'} "${name}" → fires at ${result.scheduledForIST} (in ${result.delay})`);
   return result;
 }
 
