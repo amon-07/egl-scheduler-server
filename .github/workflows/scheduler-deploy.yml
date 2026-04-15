@@ -1,0 +1,125 @@
+name: Scheduler Deploy (Systemd)
+
+on:
+  push:
+    branches: [test_staging]
+    paths:
+      - 'scheduler-server/**'
+      - '.github/workflows/scheduler-deploy.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: scheduler-deploy
+  cancel-in-progress: true
+
+env:
+  APP_DIR: /var/www/egl-backend/scheduler-server
+  SERVICE_NAME: egl-scheduler
+  NODE_MAJOR: '20'
+
+jobs:
+  deploy:
+    name: Deploy Scheduler to EC2
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Configure SSH key
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/ec2_key
+          chmod 600 ~/.ssh/ec2_key
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Bootstrap remote host (idempotent, no PM2)
+        run: |
+          ssh -i ~/.ssh/ec2_key \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+              "NODE_MAJOR=${NODE_MAJOR} APP_DIR=${APP_DIR} bash -se" <<'REMOTE'
+          set -euo pipefail
+
+          if command -v dnf >/dev/null 2>&1; then
+            PKG=dnf
+          elif command -v yum >/dev/null 2>&1; then
+            PKG=yum
+          elif command -v apt-get >/dev/null 2>&1; then
+            PKG=apt-get
+            sudo apt-get update -y
+          else
+            echo 'No supported package manager found.' >&2
+            exit 1
+          fi
+
+          install_node() {
+            if [ "$PKG" = 'apt-get' ]; then
+              curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
+              sudo apt-get install -y nodejs
+            else
+              curl -fsSL "https://rpm.nodesource.com/setup_${NODE_MAJOR}.x" | sudo bash -
+              sudo "$PKG" install -y nodejs
+            fi
+          }
+
+          if ! command -v node >/dev/null 2>&1; then
+            install_node
+          else
+            CURRENT_MAJOR="$(node -v | sed -E 's/^v([0-9]+).*/\1/')"
+            if [ "$CURRENT_MAJOR" != "$NODE_MAJOR" ]; then
+              install_node
+            fi
+          fi
+
+          if ! command -v rsync >/dev/null 2>&1; then
+            sudo "$PKG" install -y rsync
+          fi
+
+          sudo mkdir -p "$APP_DIR"
+          sudo chown -R "$(whoami):$(whoami)" "$APP_DIR"
+
+          echo 'Bootstrap complete:'
+          node -v
+          REMOTE
+
+      - name: Sync scheduler-server to remote
+        run: |
+          if [ ! -d "./scheduler-server" ]; then
+            echo "scheduler-server directory is not present in this repository checkout."
+            echo "Move this workflow to your separate scheduler-server repository (or remove the path prefix)."
+            exit 1
+          fi
+
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no -o BatchMode=yes" \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            ./scheduler-server/ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/"
+
+      - name: Write scheduler env (.env.production)
+        env:
+          SCHEDULER_ENV_FILE_CONTENTS: ${{ secrets.SCHEDULER_ENV }}
+        run: |
+          printf '%s' "$SCHEDULER_ENV_FILE_CONTENTS" > /tmp/scheduler.env.production
+          scp -i ~/.ssh/ec2_key \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              /tmp/scheduler.env.production \
+              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/.env.production"
+          rm -f /tmp/scheduler.env.production
+
+      - name: Install deps & restart systemd service
+        run: |
+          ssh -i ~/.ssh/ec2_key \
+              -o StrictHostKeyChecking=no \
+              -o BatchMode=yes \
+              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}" \
+              "APP_DIR=${APP_DIR} SERVICE_NAME=${SERVICE_NAME} APP_USER=${{ secrets.EC2_USER }} bash -se" <<'REMOTE'
+          set -euo pipefail
+          cd "$APP_DIR"
+          bash ./scripts/ec2-deploy-systemd.sh
+          REMOTE
