@@ -165,13 +165,23 @@ function createV1JobsService() {
   async function schedulePotmRecalculate({ gameId, runAt, month = null, year = null, adminId = null }) {
     if (!gameId) throw Object.assign(new Error('gameId is required.'), { status: 400, code: 'SCH400' });
 
-    const monthKey = month ?? 'auto';
-    const yearKey = year ?? 'auto';
+    const normalizedMonth = month === null || month === undefined ? null : Number(month);
+    const normalizedYear = year === null || year === undefined ? null : Number(year);
+
+    if (normalizedMonth !== null && (!Number.isInteger(normalizedMonth) || normalizedMonth < 1 || normalizedMonth > 12)) {
+      throw Object.assign(new Error('month must be an integer between 1 and 12.'), { status: 400, code: 'SCH400' });
+    }
+    if (normalizedYear !== null && (!Number.isInteger(normalizedYear) || normalizedYear < 2020 || normalizedYear > 2100)) {
+      throw Object.assign(new Error('year must be an integer between 2020 and 2100.'), { status: 400, code: 'SCH400' });
+    }
+
+    const monthKey = normalizedMonth ?? 'auto';
+    const yearKey = normalizedYear ?? 'auto';
 
     return scheduleDeterministicJob({
       jobName: 'potm:recalculate',
       jobId: `potm-recalculate:${gameId}:${monthKey}:${yearKey}`,
-      payload: { gameId, month, year, adminId },
+      payload: { gameId, month: normalizedMonth, year: normalizedYear, adminId },
       runAt,
     });
   }
