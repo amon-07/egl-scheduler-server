@@ -95,7 +95,9 @@ jobs:
         env:
           SCHEDULER_ENV_FILE_CONTENTS: ${{ secrets.SCHEDULER_ENV }}
         run: |
+          [ -n "$SCHEDULER_ENV_FILE_CONTENTS" ] || { echo "SCHEDULER_ENV secret is empty"; exit 1; }
           printf '%s' "$SCHEDULER_ENV_FILE_CONTENTS" > /tmp/scheduler.env
+          [ -s /tmp/scheduler.env ] || { echo "Rendered .env is empty"; exit 1; }
           scp -i ~/.ssh/ec2_key \
               -o StrictHostKeyChecking=no \
               -o BatchMode=yes \
@@ -112,6 +114,5 @@ jobs:
               "APP_DIR=${APP_DIR} SERVICE_NAME=${SERVICE_NAME} APP_USER=${{ secrets.EC2_USER }} bash -se" <<'REMOTE'
           set -euo pipefail
           cd "$APP_DIR"
-          bash ./scripts/ec2-deploy-systemd.sh
+          HEALTH_URL="http://127.0.0.1:4010/health" HEALTH_TIMEOUT_SEC=90 bash ./scripts/ec2-deploy-systemd.sh
           REMOTE
-

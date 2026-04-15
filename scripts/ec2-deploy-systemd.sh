@@ -4,8 +4,10 @@ set -Eeuo pipefail
 
 APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 SERVICE_NAME="${SERVICE_NAME:-egl-scheduler}"
-ENV_FILE="${ENV_FILE:-$APP_DIR/.env.production}"
+ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
 APP_USER="${APP_USER:-$(whoami)}"
+HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:4010/health}"
+HEALTH_TIMEOUT_SEC="${HEALTH_TIMEOUT_SEC:-60}"
 
 log() {
   printf '[scheduler-deploy] %s\n' "$*"
@@ -31,13 +33,8 @@ else
   npm install --omit=dev
 fi
 
-if [[ -f "$ENV_FILE" ]]; then
-  log "Linking env file: $ENV_FILE -> $APP_DIR/.env"
-  ln -sfn "$ENV_FILE" "$APP_DIR/.env"
-  chmod 600 "$ENV_FILE" || true
-else
-  log "Warning: env file not found at $ENV_FILE"
-fi
+[[ -s "$ENV_FILE" ]] || die "Required env file missing or empty: $ENV_FILE"
+chmod 600 "$ENV_FILE" || true
 
 SERVICE_PATH="/etc/systemd/system/${SERVICE_NAME}.service"
 log "Writing systemd service: $SERVICE_PATH"
@@ -69,5 +66,18 @@ sudo systemctl restart "$SERVICE_NAME"
 log "Service status"
 sudo systemctl --no-pager --full status "$SERVICE_NAME" | sed -n '1,20p'
 
-log "Deployment completed successfully"
+log "Waiting for health check: $HEALTH_URL (timeout ${HEALTH_TIMEOUT_SEC}s)"
+start_ts="$(date +%s)"
+until curl -fsS "$HEALTH_URL" >/dev/null 2>&1; do
+  now_ts="$(date +%s)"
+  elapsed="$((now_ts - start_ts))"
+  if (( elapsed >= HEALTH_TIMEOUT_SEC )); then
+    sudo journalctl -u "$SERVICE_NAME" -n 120 --no-pager || true
+    die "Service did not become healthy within ${HEALTH_TIMEOUT_SEC}s"
+  fi
+  sleep 2
+done
 
+log "Health check passed"
+
+log "Deployment completed successfully"
