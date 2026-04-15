@@ -91,17 +91,17 @@ jobs:
             --exclude='.env.*' \
             ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/"
 
-      - name: Write scheduler env (.env.production)
+      - name: Write scheduler env (.env)
         env:
           SCHEDULER_ENV_FILE_CONTENTS: ${{ secrets.SCHEDULER_ENV }}
         run: |
-          printf '%s' "$SCHEDULER_ENV_FILE_CONTENTS" > /tmp/scheduler.env.production
+          printf '%s' "$SCHEDULER_ENV_FILE_CONTENTS" > /tmp/scheduler.env
           scp -i ~/.ssh/ec2_key \
               -o StrictHostKeyChecking=no \
               -o BatchMode=yes \
-              /tmp/scheduler.env.production \
-              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/.env.production"
-          rm -f /tmp/scheduler.env.production
+              /tmp/scheduler.env \
+              "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/.env"
+          rm -f /tmp/scheduler.env
 
       - name: Install deps & restart systemd service
         run: |
