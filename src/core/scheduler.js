@@ -40,9 +40,15 @@ async function schedule(name, data, runAt, { jobId } = {}) {
   const delayMs = Math.max(fireAt.getTime() - Date.now(), 0);
 
   // Upsert: replace any existing job with this id so reschedules take effect.
+  let replaced = false;
   if (jobId) {
     const existing = await queue.getJob(jobId);
-    if (existing) await existing.remove();
+    if (existing) {
+      const prevState = await existing.getState().catch(() => 'unknown');
+      await existing.remove();
+      replaced = true;
+      console.log(`[scheduler] replaced existing job "${jobId}" (was ${prevState})`);
+    }
   }
 
   const { options = {} } = registry.get(name);
@@ -55,8 +61,9 @@ async function schedule(name, data, runAt, { jobId } = {}) {
     ...(jobId ? { jobId } : {}),
   });
 
-  console.log(`[scheduler] scheduled "${name}" (${job.id}) for ${fireAt.toISOString()} in ${delayMs}ms`);
-  return { jobId: job.id, name, scheduledFor: fireAt.toISOString(), delayMs };
+  const verb = replaced ? 'rescheduled' : 'scheduled';
+  console.log(`[scheduler] ${verb} "${name}" (${job.id}) fires=${fireAt.toISOString()} delayMs=${delayMs}`);
+  return { jobId: job.id, name, scheduledFor: fireAt.toISOString(), delayMs, replaced };
 }
 
 async function scheduleRecurring(name, data, { pattern, tz = 'Asia/Kolkata' }, { jobId } = {}) {
@@ -67,6 +74,7 @@ async function scheduleRecurring(name, data, { pattern, tz = 'Asia/Kolkata' }, {
   if (!jobId) throw new Error('recurring jobId is required');
 
   await queue.upsertJobScheduler(jobId, { pattern, tz }, { name, data });
+  console.log(`[scheduler] recurring upsert "${name}" (${jobId}) pattern="${pattern}" tz=${tz}`);
   return { jobId, name, pattern, tz };
 }
 
@@ -74,6 +82,7 @@ async function cancel(jobId) {
   const job = await queue.getJob(jobId);
   if (!job) return false;
   await job.remove();
+  console.log(`[scheduler] cancelled "${jobId}"`);
   return true;
 }
 
