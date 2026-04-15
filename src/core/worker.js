@@ -1,12 +1,5 @@
 /**
- * Worker — Processes scheduled jobs when their time arrives
- *
- * Execution flow for each job:
- *   1. Look up the registered handler by job name
- *   2. Run handler with payload + context
- *   3. Return result with timing info
- *
- * Wraps everything with structured logging, timing, and error propagation.
+ * Worker — processes jobs off the scheduler queue.
  */
 
 const { Worker } = require('bullmq');
@@ -16,80 +9,42 @@ const { QUEUE_NAME } = require('./scheduler');
 
 let _worker = null;
 
-/**
- * Process a single job.
- *
- * @param {import('bullmq').Job} job
- * @returns {Promise<object>}
- */
 async function processJob(job) {
-  const { name, data, id, attemptsMade } = job;
-  const startTime = Date.now();
-
-  console.log(`\n[worker] ▶ Processing "${name}" (id: ${id}, attempt: ${attemptsMade + 1}) at ${new Date().toISOString()}`);
-
-  // Separate internal fields from the actual payload
-  const { _meta, ...payload } = data;
-  const context = { jobId: id, meta: _meta, attempt: attemptsMade + 1 };
-
-  const jobDef = registry.get(name);
+  const jobDef = registry.get(job.name);
   if (!jobDef) {
-    throw new Error(`Job "${name}" has no registered handler. Nothing to execute.`);
+    throw new Error(`No handler registered for "${job.name}"`);
   }
 
-  const handlerResult = await jobDef.handler(payload, context);
+  const { _meta, ...payload } = job.data;
+  const context = { jobId: job.id, meta: _meta, attempt: job.attemptsMade + 1 };
 
-  const duration = Date.now() - startTime;
-  console.log(`[worker] ✓ "${name}" completed in ${duration}ms`);
-
-  return {
-    handlerResult,
-    _duration: duration,
-  };
+  const start = Date.now();
+  console.log(`[worker] ▶ ${job.name} (${job.id}) attempt=${context.attempt}`);
+  const result = await jobDef.handler(payload, context);
+  console.log(`[worker] ✓ ${job.name} (${job.id}) in ${Date.now() - start}ms`);
+  return result;
 }
 
-/**
- * Start the worker. Idempotent.
- *
- * @returns {import('bullmq').Worker}
- */
 function start() {
   if (_worker) return _worker;
 
   _worker = new Worker(QUEUE_NAME, processJob, {
     connection: redisConnection,
     concurrency: 5,
-    limiter: { max: 20, duration: 1000 },
-  });
-
-  _worker.on('completed', (job, result) => {
-    console.log(`[worker] ✓ Job "${job.name}" (${job.id}) done at ${new Date().toISOString()} — duration: ${result?._duration}ms`);
   });
 
   _worker.on('failed', (job, err) => {
-    console.error(`[worker] Job "${job?.name}" (${job?.id}) FAILED [attempt ${job?.attemptsMade}/${job?.opts?.attempts}]: ${err.message}`);
+    console.error(`[worker] ✗ ${job?.name} (${job?.id}) attempt=${job?.attemptsMade}: ${err.message}`);
   });
 
-  _worker.on('active', (job) => {
-    console.log(`[worker] ⏱ Time-hit: "${job.name}" (${job.id}) is now active at ${new Date().toISOString()}`);
-  });
-
-  _worker.on('stalled', (jobId) => {
-    console.warn(`[worker] Job ${jobId} stalled — will be retried`);
-  });
-
-  console.log(`[worker] Started on queue "${QUEUE_NAME}" (concurrency: 5)`);
+  console.log(`[worker] started on queue "${QUEUE_NAME}"`);
   return _worker;
 }
 
-/**
- * Stop the worker gracefully.
- */
 async function stop() {
   if (_worker) {
     await _worker.close();
     _worker = null;
-    console.log('[worker] Stopped.');
   }
 }
 

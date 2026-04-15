@@ -122,7 +122,7 @@ async function runStageSideEffects(updatedStage, { previousStatus }) {
 
   const terminalStatuses = [STAGE_STATUS.COMPLETED, STAGE_STATUS.DELETED, STAGE_STATUS.POSTPONED];
   if (terminalStatuses.includes(updatedStage.status)) {
-    await scheduler.cancelStageStatusJobs(stageId).catch(() => {});
+    await scheduler.cancel(`stage-status:${stageId}`).catch(() => {});
     return;
   }
 
@@ -134,7 +134,8 @@ async function runStageSideEffects(updatedStage, { previousStatus }) {
     await scheduler.schedule(
       'stage:status-check',
       { stageId, reason: 'stage_status_chain', requestedBy: 'scheduler_domain' },
-      nextRunAt
+      nextRunAt,
+      { jobId: `stage-status:${stageId}` }
     );
   }
 }
