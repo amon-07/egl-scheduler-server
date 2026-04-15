@@ -2,11 +2,8 @@ name: Scheduler Deploy (Systemd)
 
 on:
   push:
-    branches: [test_staging]
-    paths:
-      - 'scheduler-server/**'
-      - '.github/workflows/scheduler-deploy.yml'
-  workflow_dispatch:
+    branches:
+      - "**"
 
 concurrency:
   group: scheduler-deploy
@@ -15,7 +12,7 @@ concurrency:
 env:
   APP_DIR: /var/www/egl-backend/scheduler-server
   SERVICE_NAME: egl-scheduler
-  NODE_MAJOR: '20'
+  NODE_MAJOR: "20"
 
 jobs:
   deploy:
@@ -84,21 +81,15 @@ jobs:
           node -v
           REMOTE
 
-      - name: Sync scheduler-server to remote
+      - name: Sync scheduler repo to remote
         run: |
-          if [ ! -d "./scheduler-server" ]; then
-            echo "scheduler-server directory is not present in this repository checkout."
-            echo "Move this workflow to your separate scheduler-server repository (or remove the path prefix)."
-            exit 1
-          fi
-
           rsync -az --delete \
             -e "ssh -i ~/.ssh/ec2_key -o StrictHostKeyChecking=no -o BatchMode=yes" \
             --exclude='.git' \
             --exclude='node_modules' \
             --exclude='.env' \
             --exclude='.env.*' \
-            ./scheduler-server/ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/"
+            ./ "${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:${APP_DIR}/"
 
       - name: Write scheduler env (.env.production)
         env:
@@ -123,3 +114,4 @@ jobs:
           cd "$APP_DIR"
           bash ./scripts/ec2-deploy-systemd.sh
           REMOTE
+
