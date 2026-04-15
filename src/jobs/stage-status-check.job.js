@@ -10,7 +10,10 @@ module.exports = {
       throw new Error('stageId is required in payload');
     }
 
-    return handleStageStatusCheck({ stageId: payload.stageId });
+    console.log(`[job:stage-status] fired at ${new Date().toISOString()} for stageId=${payload.stageId}`);
+    const result = await handleStageStatusCheck({ stageId: payload.stageId });
+    console.log(`[job:stage-status] result for stageId=${payload.stageId}:`, result);
+    return result;
   },
 
   options: {

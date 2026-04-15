@@ -26,7 +26,7 @@ async function processJob(job) {
   const { name, data, id, attemptsMade } = job;
   const startTime = Date.now();
 
-  console.log(`\n[worker] ▶ Processing "${name}" (id: ${id}, attempt: ${attemptsMade + 1})`);
+  console.log(`\n[worker] ▶ Processing "${name}" (id: ${id}, attempt: ${attemptsMade + 1}) at ${new Date().toISOString()}`);
 
   // Separate internal fields from the actual payload
   const { _meta, ...payload } = data;
@@ -63,11 +63,15 @@ function start() {
   });
 
   _worker.on('completed', (job, result) => {
-    console.log(`[worker] Job "${job.name}" (${job.id}) done — duration: ${result?._duration}ms`);
+    console.log(`[worker] ✓ Job "${job.name}" (${job.id}) done at ${new Date().toISOString()} — duration: ${result?._duration}ms`);
   });
 
   _worker.on('failed', (job, err) => {
     console.error(`[worker] Job "${job?.name}" (${job?.id}) FAILED [attempt ${job?.attemptsMade}/${job?.opts?.attempts}]: ${err.message}`);
+  });
+
+  _worker.on('active', (job) => {
+    console.log(`[worker] ⏱ Time-hit: "${job.name}" (${job.id}) is now active at ${new Date().toISOString()}`);
   });
 
   _worker.on('stalled', (jobId) => {
