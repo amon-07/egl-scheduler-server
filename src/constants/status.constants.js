@@ -1,0 +1,32 @@
+const TOURNAMENT_STATUS = {
+  DRAFT: '0',
+  UPCOMING: '1',
+  OPEN: '2',
+  COMPLETED: '3',
+  DELETED: '4',
+};
+
+const STAGE_STATUS = {
+  UPCOMING: '0',
+  PRE_REGISTRATION_OPEN: '1',
+  PRE_REGISTRATION_CLOSED: '2',
+  OPEN: '3',
+  FILLED: '4',
+  IN_PROGRESS: '5',
+  COMPLETED: '6',
+  POSTPONED: '7',
+  DELETED: '8',
+};
+
+const REGISTRATION_STATUS = {
+  PENDING: '0',
+  APPROVED: '1',
+  REJECTED: '2',
+  WITHDRAWN: '3',
+};
+
+module.exports = {
+  TOURNAMENT_STATUS,
+  STAGE_STATUS,
+  REGISTRATION_STATUS,
+};

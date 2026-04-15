@@ -1,0 +1,20 @@
+const { handleStageStatusCheck } = require('../domain/status-automation.domain');
+
+const JOB_NAME = 'stage:status-check';
+
+module.exports = {
+  name: JOB_NAME,
+
+  handler: async (payload = {}) => {
+    if (!payload.stageId) {
+      throw new Error('stageId is required in payload');
+    }
+
+    return handleStageStatusCheck({ stageId: payload.stageId });
+  },
+
+  options: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 3000 },
+  },
+};

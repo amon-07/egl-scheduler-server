@@ -100,6 +100,60 @@ async function schedule(name, data, runAt, opts = {}) {
 }
 
 /**
+ * Schedule a recurring cron-based job in a specific timezone.
+ * This is idempotent when called repeatedly with same name+jobId+pattern.
+ */
+async function scheduleRecurring(name, data, repeatConfig = {}, opts = {}) {
+  if (!registry.has(name)) {
+    throw new Error(`Unknown job type: "${name}". Registered types: [${registry.listRegistered().join(', ')}]`);
+  }
+
+  const { pattern, tz = 'Asia/Kolkata', startDate } = repeatConfig;
+  if (!pattern) {
+    throw new Error('repeatConfig.pattern is required for recurring scheduling');
+  }
+
+  const jobDef = registry.get(name);
+  const jobOptions = {
+    ...jobDef.options,
+    ...(opts.jobId ? { jobId: opts.jobId } : {}),
+    repeat: {
+      pattern,
+      tz,
+      ...(startDate ? { startDate } : {}),
+    },
+  };
+
+  const job = await queue.add(name, {
+    ...data,
+    _meta: {
+      recurring: true,
+      cron: pattern,
+      tz,
+      scheduledAt: new Date().toISOString(),
+    },
+  }, jobOptions);
+
+  return {
+    jobId: job.id,
+    name: job.name,
+    repeat: job.opts?.repeat || null,
+  };
+}
+
+async function listRecurring(limit = 200) {
+  const items = await queue.getRepeatableJobs(0, Math.max(0, limit - 1));
+  return items.map((item) => ({
+    key: item.key,
+    name: item.name,
+    id: item.id || null,
+    pattern: item.pattern || item.cron || null,
+    tz: item.tz || null,
+    next: item.next || null,
+  }));
+}
+
+/**
  * Cancel a scheduled job by ID.
  *
  * @param {string} jobId
@@ -112,6 +166,58 @@ async function cancel(jobId) {
   await job.remove();
   console.log(`[scheduler] Cancelled job "${jobId}"`);
   return true;
+}
+
+/**
+ * Get a job by ID with current queue state.
+ *
+ * @param {string} jobId
+ * @returns {Promise<object|null>}
+ */
+async function get(jobId) {
+  const job = await queue.getJob(jobId);
+  if (!job) return null;
+
+  const state = await job.getState();
+  return {
+    id: job.id,
+    name: job.name,
+    data: job.data,
+    state,
+    attemptsMade: job.attemptsMade,
+    attempts: job.opts?.attempts || 0,
+    delay: job.delay || 0,
+    scheduledFor: job.data?._meta?.scheduledFor || null,
+    timestamp: job.timestamp ? new Date(job.timestamp).toISOString() : null,
+  };
+}
+
+async function _cancelJobsByPredicate(predicateFn) {
+  const jobs = await queue.getJobs(['delayed', 'waiting', 'prioritized', 'paused']);
+  let removed = 0;
+  for (const job of jobs) {
+    try {
+      if (predicateFn(job)) {
+        await job.remove();
+        removed += 1;
+      }
+    } catch {
+      // best effort
+    }
+  }
+  return removed;
+}
+
+async function cancelStageStatusJobs(stageId) {
+  if (!stageId) return 0;
+  const stageIdStr = String(stageId);
+  return _cancelJobsByPredicate((job) => job.name === 'stage:status-check' && String(job.data?.stageId) === stageIdStr);
+}
+
+async function cancelTournamentStatusJobs(tournamentId) {
+  if (!tournamentId) return 0;
+  const tournamentIdStr = String(tournamentId);
+  return _cancelJobsByPredicate((job) => job.name === 'tournament:status-check' && String(job.data?.tournamentId) === tournamentIdStr);
 }
 
 /**
@@ -178,4 +284,16 @@ async function shutdown() {
   await queue.close();
 }
 
-module.exports = { schedule, cancel, list, recover, shutdown, QUEUE_NAME };
+module.exports = {
+  schedule,
+  scheduleRecurring,
+  listRecurring,
+  cancel,
+  get,
+  list,
+  cancelStageStatusJobs,
+  cancelTournamentStatusJobs,
+  recover,
+  shutdown,
+  QUEUE_NAME,
+};
