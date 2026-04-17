@@ -1,4 +1,7 @@
 const crypto = require('crypto');
+const log = require('../utils/logger');
+
+const TAG = 'admin-backend';
 
 function normalizeBaseUrl(baseUrl) {
   if (!baseUrl || typeof baseUrl !== 'string') return null;
@@ -45,6 +48,12 @@ async function requestAdminBackend({ method = 'POST', path, body = {} }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+  const start = Date.now();
+  log.info(TAG, `Outgoing request: ${method} ${requestPath}`, {
+    url,
+    timeoutMs,
+  });
+
   try {
     const response = await fetch(url, {
       method,
@@ -63,11 +72,21 @@ async function requestAdminBackend({ method = 'POST', path, body = {} }) {
 
     if (!response.ok) {
       const message = parsed?.message || `Admin backend request failed (${response.status})`;
+      log.error(TAG, `Response error: ${method} ${requestPath}`, {
+        status: response.status,
+        durationMs: Date.now() - start,
+        error: message,
+      });
       const error = new Error(message);
       error.status = response.status;
       error.response = parsed;
       throw error;
     }
+
+    log.info(TAG, `Response OK: ${method} ${requestPath}`, {
+      status: response.status,
+      durationMs: Date.now() - start,
+    });
 
     return parsed;
   } finally {

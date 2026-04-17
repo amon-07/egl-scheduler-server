@@ -1,4 +1,7 @@
 const scheduler = require('../core/scheduler');
+const log = require('../utils/logger');
+
+const TAG = 'scheduler:recurring';
 
 function parseCsvEnv(value) {
   if (!value) return [];
@@ -8,7 +11,7 @@ function parseCsvEnv(value) {
 async function ensureRecurringSchedules() {
   const enabled = String(process.env.SCHEDULER_ENABLE_RECURRING || 'true').toLowerCase() === 'true';
   if (!enabled) {
-    console.log('[scheduler:recurring] disabled');
+    log.info(TAG, 'Recurring jobs disabled');
     return;
   }
 
@@ -26,7 +29,7 @@ async function ensureRecurringSchedules() {
       { pattern: potmCron, tz },
       { jobId: `repeat:potm:${gameId}` }
     );
-    console.log(`[scheduler:recurring] POTM game=${gameId} cron="${potmCron}" tz=${tz}`);
+    log.info(TAG, 'POTM recurring registered', { gameId, cron: potmCron, tz });
   }
 
   for (const gameId of globalGameIds) {
@@ -36,7 +39,7 @@ async function ensureRecurringSchedules() {
       { pattern: globalCron, tz },
       { jobId: `repeat:leaderboard:${gameId}` }
     );
-    console.log(`[scheduler:recurring] Global leaderboard game=${gameId} cron="${globalCron}" tz=${tz}`);
+    log.info(TAG, 'Global leaderboard recurring registered', { gameId, cron: globalCron, tz });
   }
 }
 

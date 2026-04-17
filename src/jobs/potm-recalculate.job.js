@@ -1,4 +1,7 @@
 const { runPotmRecalculation } = require('../integrations/admin-backend.client');
+const log = require('../utils/logger');
+
+const TAG = 'job:potm-recalculate';
 
 module.exports = {
   name: 'potm:recalculate',
@@ -9,7 +12,16 @@ module.exports = {
       throw new Error('gameId is required in payload');
     }
 
+    log.info(TAG, 'Calling admin backend for POTM recalculation', { gameId, month, year });
+    const start = Date.now();
     const response = await runPotmRecalculation({ gameId, month, year });
+    log.info(TAG, 'Admin backend POTM recalculation completed', {
+      gameId,
+      month,
+      year,
+      durationMs: Date.now() - start,
+      responseStatus: response?.status,
+    });
 
     return {
       gameId,

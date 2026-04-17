@@ -1,6 +1,8 @@
 const { handleStageStatusCheck } = require('../domain/status-automation.domain');
+const log = require('../utils/logger');
 
 const JOB_NAME = 'stage:status-check';
+const TAG = 'job:stage-status';
 
 module.exports = {
   name: JOB_NAME,
@@ -10,9 +12,9 @@ module.exports = {
       throw new Error('stageId is required in payload');
     }
 
-    console.log(`[job:stage-status] fired at ${new Date().toISOString()} for stageId=${payload.stageId}`);
+    log.info(TAG, 'Job fired', { stageId: payload.stageId });
     const result = await handleStageStatusCheck({ stageId: payload.stageId });
-    console.log(`[job:stage-status] result for stageId=${payload.stageId}:`, result);
+    log.info(TAG, 'Job result', { stageId: payload.stageId, result });
     return result;
   },
 

@@ -3,6 +3,7 @@ const Stage = require('../models/stage.model');
 const StageRegistration = require('../models/stage-registration.model');
 const scheduler = require('../core/scheduler');
 const cacheInvalidation = require('../utils/cache-invalidation.utils');
+const log = require('../utils/logger');
 const {
   TOURNAMENT_STATUS,
   STAGE_STATUS,
@@ -10,7 +11,7 @@ const {
 } = require('../constants/status.constants');
 
 async function handleTournamentStatusCheck({ tournamentId }) {
-  console.log(`[domain:tournament-status] evaluating tournamentId=${tournamentId} at ${new Date().toISOString()}`);
+  log.info('domain:tournament-status', 'Evaluating tournament status', { tournamentId });
   const now = new Date();
   const tournament = await Tournament.findById(tournamentId)
     .select('status startDate endDate')
@@ -36,11 +37,11 @@ async function handleTournamentStatusCheck({ tournamentId }) {
 
   if (newStatus && newStatus !== tournament.status) {
     await Tournament.updateOne({ _id: tournamentId }, { $set: { status: newStatus } });
-    console.log(`[domain:tournament-status] updated tournamentId=${tournamentId} from=${tournament.status} to=${newStatus}`);
+    log.info('domain:tournament-status', 'Tournament status updated', { tournamentId, from: tournament.status, to: newStatus });
     return { tournamentId, action: 'updated', from: tournament.status, to: newStatus };
   }
 
-  console.log(`[domain:tournament-status] no change for tournamentId=${tournamentId}; current=${tournament.status}`);
+  log.debug('domain:tournament-status', 'No status change', { tournamentId, current: tournament.status });
   return { tournamentId, action: 'no_change' };
 }
 
@@ -141,7 +142,7 @@ async function runStageSideEffects(updatedStage, { previousStatus }) {
 }
 
 async function handleStageStatusCheck({ stageId }) {
-  console.log(`[domain:stage-status] evaluating stageId=${stageId} at ${new Date().toISOString()}`);
+  log.info('domain:stage-status', 'Evaluating stage status', { stageId });
   const now = new Date();
   const stage = await Stage.findById(stageId)
     .select('status startDate endDate registrationWindowStart registrationWindowEnd '
@@ -152,13 +153,13 @@ async function handleStageStatusCheck({ stageId }) {
   if (!stage) return { stageId, action: 'skipped', reason: 'not_found' };
 
   if ([STAGE_STATUS.COMPLETED, STAGE_STATUS.DELETED].includes(stage.status)) {
-    console.log(`[domain:stage-status] skipped stageId=${stageId}; terminal status=${stage.status}`);
+    log.debug('domain:stage-status', 'Skipped terminal stage', { stageId, status: stage.status });
     return { stageId, action: 'skipped', reason: 'terminal_status' };
   }
 
   const newStatus = deriveStageStatus(stage, now);
   if (!newStatus || newStatus === stage.status) {
-    console.log(`[domain:stage-status] no change for stageId=${stageId}; current=${stage.status}`);
+    log.debug('domain:stage-status', 'No status change', { stageId, current: stage.status });
     return { stageId, action: 'no_change' };
   }
 
@@ -197,7 +198,7 @@ async function handleStageStatusCheck({ stageId }) {
     };
   }
 
-  console.log(`[domain:stage-status] updated stageId=${stageId} from=${stage.status} to=${newStatus}`);
+  log.info('domain:stage-status', 'Stage status updated', { stageId, from: stage.status, to: newStatus });
   return { stageId, action: 'updated', from: stage.status, to: newStatus };
 }
 

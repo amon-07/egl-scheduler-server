@@ -16,6 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 const registry = require('../core/registry');
+const log = require('../utils/logger');
+
+const TAG = 'jobs';
 
 function loadAll() {
   const jobDir = __dirname;
@@ -24,11 +27,11 @@ function loadAll() {
   for (const file of files) {
     const jobDef = require(path.join(jobDir, file));
     registry.register(jobDef);
-    console.log(`[jobs] Registered "${jobDef.name}" (from ${file})`);
+    log.info(TAG, `Registered "${jobDef.name}"`, { file });
   }
 
   const registered = registry.listRegistered();
-  console.log(`[jobs] ${registered.length} job type(s) loaded: [${registered.join(', ')}]`);
+  log.info(TAG, `${registered.length} job type(s) loaded`, { jobs: registered });
 }
 
 module.exports = { loadAll };

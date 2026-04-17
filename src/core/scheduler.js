@@ -8,6 +8,9 @@
 const { Queue } = require('bullmq');
 const { redisConnection } = require('../config/redis.config');
 const registry = require('./registry');
+const log = require('../utils/logger');
+
+const TAG = 'scheduler';
 
 const QUEUE_NAME = 'scheduler';
 
@@ -47,7 +50,7 @@ async function schedule(name, data, runAt, { jobId } = {}) {
       const prevState = await existing.getState().catch(() => 'unknown');
       await existing.remove();
       replaced = true;
-      console.log(`[scheduler] replaced existing job "${jobId}" (was ${prevState})`);
+      log.info(TAG, `Replaced existing job`, { jobId, previousState: prevState });
     }
   }
 
@@ -62,7 +65,7 @@ async function schedule(name, data, runAt, { jobId } = {}) {
   });
 
   const verb = replaced ? 'rescheduled' : 'scheduled';
-  console.log(`[scheduler] ${verb} "${name}" (${job.id}) fires=${fireAt.toISOString()} delayMs=${delayMs}`);
+  log.info(TAG, `Job ${verb}: "${name}"`, { jobId: job.id, firesAt: fireAt.toISOString(), delayMs });
   return { jobId: job.id, name, scheduledFor: fireAt.toISOString(), delayMs, replaced };
 }
 
@@ -74,7 +77,7 @@ async function scheduleRecurring(name, data, { pattern, tz = 'Asia/Kolkata' }, {
   if (!jobId) throw new Error('recurring jobId is required');
 
   await queue.upsertJobScheduler(jobId, { pattern, tz }, { name, data });
-  console.log(`[scheduler] recurring upsert "${name}" (${jobId}) pattern="${pattern}" tz=${tz}`);
+  log.info(TAG, `Recurring job upserted: "${name}"`, { jobId, pattern, tz });
   return { jobId, name, pattern, tz };
 }
 
@@ -82,7 +85,7 @@ async function cancel(jobId) {
   const job = await queue.getJob(jobId);
   if (!job) return false;
   await job.remove();
-  console.log(`[scheduler] cancelled "${jobId}"`);
+  log.info(TAG, 'Job cancelled', { jobId });
   return true;
 }
 
