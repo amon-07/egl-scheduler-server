@@ -116,14 +116,14 @@ async function runStageSideEffects(updatedStage, { previousStatus }) {
         'tournament:status-check',
         { tournamentId, reason: 'stage_status_chain', requestedBy: 'scheduler_domain' },
         nowPlusOneSecond,
-        { jobId: `tournament-status:${tournamentId}` }
+        { jobId: `tournament-status-${tournamentId}` }
       ),
     ]);
   }
 
   const terminalStatuses = [STAGE_STATUS.COMPLETED, STAGE_STATUS.DELETED, STAGE_STATUS.POSTPONED];
   if (terminalStatuses.includes(updatedStage.status)) {
-    await scheduler.cancel(`stage-status:${stageId}`).catch(() => {});
+    await scheduler.cancel(`stage-status-${stageId}`).catch(() => {});
     return;
   }
 
@@ -136,7 +136,7 @@ async function runStageSideEffects(updatedStage, { previousStatus }) {
       'stage:status-check',
       { stageId, reason: 'stage_status_chain', requestedBy: 'scheduler_domain' },
       nextRunAt,
-      { jobId: `stage-status:${stageId}` }
+      { jobId: `stage-status-${stageId}` }
     );
   }
 }

@@ -45,10 +45,10 @@ function createV1JobsService() {
 
     const stage = await Stage.findById(stageId).select('_id status tournamentId').lean();
     if (!stage) {
-      return { status: 'ok', action: 'skipped_not_found', jobId: `stage-status:${stageId}` };
+      return { status: 'ok', action: 'skipped_not_found', jobId: `stage-status-${stageId}` };
     }
 
-    const jobId = `stage-status:${stageId}`;
+    const jobId = `stage-status-${stageId}`;
 
     if ([STAGE_STATUS.DELETED, STAGE_STATUS.POSTPONED, STAGE_STATUS.COMPLETED].includes(stage.status)) {
       const cancelled = await scheduler.cancel(jobId).catch(() => false);
@@ -78,10 +78,10 @@ function createV1JobsService() {
 
     const tournament = await Tournament.findById(tournamentId).select('_id status').lean();
     if (!tournament) {
-      return { status: 'ok', action: 'skipped_not_found', jobId: `tournament-status:${tournamentId}` };
+      return { status: 'ok', action: 'skipped_not_found', jobId: `tournament-status-${tournamentId}` };
     }
 
-    const jobId = `tournament-status:${tournamentId}`;
+    const jobId = `tournament-status-${tournamentId}`;
 
     if ([TOURNAMENT_STATUS.DELETED, TOURNAMENT_STATUS.COMPLETED].includes(tournament.status)) {
       const cancelled = await scheduler.cancel(jobId).catch(() => false);
@@ -156,7 +156,7 @@ function createV1JobsService() {
 
     return scheduleDeterministicJob({
       jobName: 'leaderboard:global-recalculate',
-      jobId: `leaderboard-global:${gameId}:${participantType}`,
+      jobId: `leaderboard-global-${gameId}-${participantType}`,
       payload: { gameId, participantType, adminId, useCustomConfig: Boolean(useCustomConfig) },
       runAt,
     });
@@ -180,7 +180,7 @@ function createV1JobsService() {
 
     return scheduleDeterministicJob({
       jobName: 'potm:recalculate',
-      jobId: `potm-recalculate:${gameId}:${monthKey}:${yearKey}`,
+      jobId: `potm-recalculate-${gameId}-${monthKey}-${yearKey}`,
       payload: { gameId, month: normalizedMonth, year: normalizedYear, adminId },
       runAt,
     });

@@ -27,7 +27,7 @@ async function ensureRecurringSchedules() {
       'potm:recalculate',
       { gameId, month: null, year: null, adminId: null },
       { pattern: potmCron, tz },
-      { jobId: `repeat:potm:${gameId}` }
+      { jobId: `repeat-potm-${gameId}` }
     );
     log.info(TAG, 'POTM recurring registered', { gameId, cron: potmCron, tz });
   }
@@ -37,7 +37,7 @@ async function ensureRecurringSchedules() {
       'leaderboard:global-recalculate',
       { gameId, participantType: 'Team', adminId: null, useCustomConfig: false },
       { pattern: globalCron, tz },
-      { jobId: `repeat:leaderboard:${gameId}` }
+      { jobId: `repeat-leaderboard-${gameId}` }
     );
     log.info(TAG, 'Global leaderboard recurring registered', { gameId, cron: globalCron, tz });
   }
