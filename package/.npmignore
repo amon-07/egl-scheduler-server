@@ -1,0 +1,10 @@
+src
+node_modules
+*.log
+.env
+.env.*
+tsconfig.tsbuildinfo
+coverage
+test
+tests
+__tests__

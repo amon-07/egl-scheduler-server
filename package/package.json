@@ -1,0 +1,23 @@
+{
+  "name": "lazy-scheduler",
+  "version": "0.1.0",
+  "description": "Mongo-backed lazy scheduler built on BullMQ and Redis.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "peerDependencies": {
+    "bullmq": "^5.20.0",
+    "ioredis": "^5.4.1",
+    "mongoose": "^8.19.3"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
