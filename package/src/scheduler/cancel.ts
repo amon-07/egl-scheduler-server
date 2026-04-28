@@ -6,7 +6,10 @@ export interface CancelDeps {
 }
 
 export async function cancelJob(deps: CancelDeps, jobId: string): Promise<{ status: 'ok'; cancelled: boolean; jobId: string }> {
-  const removed = await deps.queue.remove(jobId).catch(() => false);
+  const existing = await deps.store.getByJobId(jobId);
+  const removed = existing?.bullJobId
+    ? await deps.queue.remove(existing.bullJobId).catch(() => false)
+    : false;
   const record = await deps.store.markCancelled(jobId);
 
   return {

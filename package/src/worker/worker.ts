@@ -10,6 +10,7 @@ export interface WorkerDeps {
   store: SchedulerStore;
   logger: SchedulerLogger;
   concurrency: number;
+  deadLetterOnExhausted: boolean;
 }
 
 export interface LazyWorker {
@@ -21,36 +22,48 @@ export function createWorker(deps: WorkerDeps): LazyWorker {
   let worker: Worker | null = null;
 
   async function processJob(job: Job): Promise<unknown> {
-    const meta = job.data?._lazyScheduler as { jobId?: string; runAt?: string } | undefined;
+    const meta = job.data?._lazyScheduler as { jobId?: string; version?: number; runAt?: string } | undefined;
     const jobId = meta?.jobId ?? String(job.id);
+    const version = Number(meta?.version ?? 0);
     const registered = deps.registry.get(job.name);
 
     if (!registered) {
       throw new Error(`No handler registered for scheduler job "${job.name}"`);
     }
 
-    const runningRecord = await deps.store.markRunning(jobId);
+    const runningRecord = await deps.store.markRunning(jobId, version);
     if (!runningRecord) {
-      throw new Error(`Scheduler record not found for job "${jobId}"`);
+      deps.logger.warn('lazy-scheduler:worker', 'Skipping stale or inactive job delivery', {
+        jobId,
+        version,
+        name: job.name,
+      });
+      return { skipped: true, reason: 'stale_or_inactive' };
     }
 
     try {
       const { _lazyScheduler: _ignored, ...payload } = job.data ?? {};
+      const attempt = job.attemptsMade + 1;
+      const maxAttempts = Number(job.opts.attempts ?? runningRecord.attempts);
       const result = await registered.handler(payload, {
         jobId,
-        attempt: job.attemptsMade + 1,
-        maxAttempts: Number(job.opts.attempts ?? runningRecord.attempts),
+        attempt,
+        maxAttempts,
         runAt: runningRecord.runAt,
         record: runningRecord,
       });
 
-      await deps.store.markCompleted(jobId);
+      await deps.store.markCompleted(jobId, version);
       return result;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       const maxAttempts = Number(job.opts.attempts ?? runningRecord.attempts);
       const retryable = job.attemptsMade + 1 < maxAttempts;
-      await deps.store.markFailed(jobId, err, retryable);
+      if (!retryable && deps.deadLetterOnExhausted) {
+        await deps.store.markDeadLetter(jobId, version, err);
+      } else {
+        await deps.store.markFailed(jobId, version, err, retryable);
+      }
       throw err;
     }
   }

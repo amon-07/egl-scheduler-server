@@ -1,4 +1,5 @@
 export { createScheduler } from './createScheduler';
+export { createMongoAdapter, defineStorageAdapter } from './adapters';
 
 export type {
   JobContext,
@@ -10,4 +11,8 @@ export type {
   ScheduleJobResult,
   SchedulerJobRecord,
   SchedulerJobStatus,
+  StorageAdapter,
+  SchedulerStore,
 } from './types';
+
+export type { MongoAdapterConfig } from './adapters';

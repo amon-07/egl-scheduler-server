@@ -28,8 +28,11 @@ export async function scheduleJob(deps: ScheduleDeps, input: ScheduleJobInput): 
     backoff: input.backoff ?? registered.defaultOptions.backoff ?? deps.defaults.backoff,
   };
 
+  const existing = await deps.store.getByJobId(input.jobId);
   if (input.replaceExisting !== false) {
-    await deps.queue.remove(input.jobId).catch(() => false);
+    if (existing?.bullJobId) {
+      await deps.queue.remove(existing.bullJobId).catch(() => false);
+    }
   }
 
   const record = await deps.store.upsertScheduledJob({ ...input, runAt }, options);
@@ -39,7 +42,7 @@ export async function scheduleJob(deps: ScheduleDeps, input: ScheduleJobInput): 
 
   return {
     status: 'ok',
-    action: delayMs === 0 ? 'queued_immediately' : 'scheduled',
+    action: delayMs === 0 ? 'queued_immediately' : existing ? 'rescheduled' : 'scheduled',
     jobId: record.jobId,
     name: record.name,
     runAt: runAt.toISOString(),

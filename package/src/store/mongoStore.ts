@@ -22,6 +22,8 @@ type ModelLike = {
 
 const MODEL_NAME = 'LazySchedulerJob';
 const COLLECTION_NAME = 'scheduler_jobs';
+const ACTIVE_STATUSES = ['pending', 'queued', 'failed_retryable'] as const;
+const TERMINAL_STATUSES = ['completed', 'failed', 'dead_letter', 'cancelled', 'expired'] as const;
 
 export function createMongoStore(mongoose: unknown): SchedulerStore {
   const model = createSchedulerJobModel(mongoose as MongoLike);
@@ -30,12 +32,14 @@ export function createMongoStore(mongoose: unknown): SchedulerStore {
     async upsertScheduledJob(input: ScheduleJobInput, options: JobOptions) {
       const runAt = normalizeRunAt(input.runAt);
       const attempts = input.attempts ?? options.attempts ?? 3;
+      const version = Date.now();
 
       const record = await model.findOneAndUpdate(
         { jobId: input.jobId },
         {
           $set: {
             jobId: input.jobId,
+            version,
             name: input.name,
             payload: input.payload,
             runAt,
@@ -43,15 +47,14 @@ export function createMongoStore(mongoose: unknown): SchedulerStore {
             status: 'pending',
             attempts,
             backoff: input.backoff ?? options.backoff,
+            attemptsMade: 0,
             createdBy: input.createdBy ?? null,
             metadata: input.metadata ?? {},
             lockedAt: null,
             startedAt: null,
             finishedAt: null,
+            deadLetterAt: null,
             lastError: null,
-          },
-          $setOnInsert: {
-            attemptsMade: 0,
           },
         },
         { new: true, upsert: true, lean: true }
@@ -61,47 +64,62 @@ export function createMongoStore(mongoose: unknown): SchedulerStore {
     },
 
     markQueued(jobId, bullJobId) {
-      return updateStatus(model, jobId, 'queued', { bullJobId });
+      return updateStatus(model, { jobId, status: { $nin: TERMINAL_STATUSES } }, 'queued', { bullJobId });
     },
 
-    markRunning(jobId) {
-      return updateStatus(model, jobId, 'running', {
+    markRunning(jobId, version) {
+      return updateStatus(model, {
+        jobId,
+        version,
+        status: { $in: ACTIVE_STATUSES },
+        $expr: { $lt: ['$attemptsMade', '$attempts'] },
+      }, 'running', {
         lockedAt: new Date(),
         startedAt: new Date(),
+        finishedAt: null,
         $inc: { attemptsMade: 1 },
       });
     },
 
-    markCompleted(jobId) {
-      return updateStatus(model, jobId, 'completed', {
+    markCompleted(jobId, version) {
+      return updateStatus(model, { jobId, version, status: 'running' }, 'completed', {
         lockedAt: null,
         finishedAt: new Date(),
       });
     },
 
-    markFailed(jobId, error, retryable) {
-      return updateStatus(model, jobId, retryable ? 'failed_retryable' : 'failed', {
+    markFailed(jobId, version, error, retryable) {
+      return updateStatus(model, { jobId, version, status: 'running' }, retryable ? 'failed_retryable' : 'failed', {
         lockedAt: null,
         finishedAt: new Date(),
         lastError: error.message,
       });
     },
 
+    markDeadLetter(jobId, version, error) {
+      return updateStatus(model, { jobId, version, status: 'running' }, 'dead_letter', {
+        lockedAt: null,
+        finishedAt: new Date(),
+        deadLetterAt: new Date(),
+        lastError: error.message,
+      });
+    },
+
     markCancelled(jobId) {
-      return updateStatus(model, jobId, 'cancelled', {
+      return updateStatus(model, { jobId, status: { $nin: TERMINAL_STATUSES } }, 'cancelled', {
         lockedAt: null,
         finishedAt: new Date(),
       });
     },
 
     markExpired(jobId) {
-      return updateStatus(model, jobId, 'expired', {
+      return updateStatus(model, { jobId, status: { $nin: TERMINAL_STATUSES } }, 'expired', {
         lockedAt: null,
         finishedAt: new Date(),
       });
     },
 
-    async findReconcileCandidates(staleRunningAfterMs) {
+    async findReconcileCandidates(staleRunningAfterMs, limit) {
       const staleBefore = new Date(Date.now() - staleRunningAfterMs);
 
       return model.find({
@@ -109,7 +127,7 @@ export function createMongoStore(mongoose: unknown): SchedulerStore {
           { status: { $in: ['pending', 'queued', 'failed_retryable'] } },
           { status: 'running', lockedAt: { $lte: staleBefore } },
         ],
-      }).sort({ runAt: 1 }).limit(1000).lean();
+      }).sort({ runAt: 1 }).limit(limit).lean();
     },
 
     getByJobId(jobId) {
@@ -138,6 +156,7 @@ function createSchedulerJobModel(mongoose: MongoLike): ModelLike {
       jobId: { type: String, required: true, unique: true, index: true },
       name: { type: String, required: true, index: true },
       payload: { type: Object, default: {} },
+      version: { type: Number, required: true, default: 0 },
       runAt: { type: Date, required: true, index: true },
       ttlMs: { type: Number },
       status: { type: String, required: true, index: true },
@@ -148,6 +167,7 @@ function createSchedulerJobModel(mongoose: MongoLike): ModelLike {
       lockedAt: { type: Date },
       startedAt: { type: Date },
       finishedAt: { type: Date },
+      deadLetterAt: { type: Date },
       lastError: { type: String },
       createdBy: { type: String },
       metadata: { type: Object, default: {} },
@@ -167,7 +187,7 @@ function createSchedulerJobModel(mongoose: MongoLike): ModelLike {
 
 function updateStatus(
   model: ModelLike,
-  jobId: string,
+  filter: Record<string, unknown>,
   status: SchedulerJobStatus,
   set: Record<string, unknown> = {}
 ): Promise<SchedulerJobRecord | null> {
@@ -175,7 +195,7 @@ function updateStatus(
   const { $inc: _unused, ...setFields } = set;
 
   return model.findOneAndUpdate(
-    { jobId },
+    filter,
     {
       $set: { ...setFields, status },
       ...(inc ? { $inc: inc } : {}),

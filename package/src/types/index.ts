@@ -5,6 +5,7 @@ export type SchedulerJobStatus =
   | 'completed'
   | 'failed_retryable'
   | 'failed'
+  | 'dead_letter'
   | 'cancelled'
   | 'expired';
 
@@ -73,6 +74,7 @@ export interface ScheduleJobResult {
 
 export interface SchedulerJobRecord<TPayload extends JsonObject = JsonObject> {
   jobId: string;
+  version: number;
   name: string;
   payload: TPayload;
   runAt: Date;
@@ -85,6 +87,7 @@ export interface SchedulerJobRecord<TPayload extends JsonObject = JsonObject> {
   lockedAt?: Date | null;
   startedAt?: Date | null;
   finishedAt?: Date | null;
+  deadLetterAt?: Date | null;
   lastError?: string | null;
   createdBy?: string | null;
   metadata?: JsonObject;
@@ -99,20 +102,29 @@ export interface ListJobsFilter {
 }
 
 export interface WorkerConfig {
-  concurrency?: number;
+  concurrency?: number | 'auto';
 }
 
 export interface SchedulerDefaults extends JobOptions {
   staleRunningAfterMs?: number;
+  deadLetterOnExhausted?: boolean;
+  reconcileBatchSize?: number;
 }
 
 export interface LazySchedulerConfig {
   queueName: string;
   redisConnection: unknown;
-  mongoose: unknown;
+  mongoose?: unknown;
+  store?: SchedulerStore;
   logger?: Partial<SchedulerLogger>;
   worker?: WorkerConfig;
   defaults?: SchedulerDefaults;
+  locks?: {
+    enabled?: boolean;
+    keyPrefix?: string;
+    ttlMs?: number;
+    instanceId?: string;
+  };
 }
 
 export interface LazyScheduler {
@@ -123,6 +135,7 @@ export interface LazyScheduler {
   cancel(jobId: string): Promise<{ status: 'ok'; cancelled: boolean; jobId: string }>;
   get(jobId: string): Promise<SchedulerJobRecord | null>;
   list(filter?: ListJobsFilter): Promise<SchedulerJobRecord[]>;
+  listDeadLetters(filter?: Omit<ListJobsFilter, 'status'>): Promise<SchedulerJobRecord[]>;
   shutdown(): Promise<void>;
 }
 
@@ -138,24 +151,28 @@ export interface ReconcileResult {
   expired: number;
   staleRetried: number;
   skipped: number;
+  lockAcquired: boolean;
 }
 
 export interface SchedulerStore {
   upsertScheduledJob(input: ScheduleJobInput, options: JobOptions): Promise<SchedulerJobRecord>;
   markQueued(jobId: string, bullJobId?: string): Promise<SchedulerJobRecord | null>;
-  markRunning(jobId: string): Promise<SchedulerJobRecord | null>;
-  markCompleted(jobId: string): Promise<SchedulerJobRecord | null>;
-  markFailed(jobId: string, error: Error, retryable: boolean): Promise<SchedulerJobRecord | null>;
+  markRunning(jobId: string, version: number): Promise<SchedulerJobRecord | null>;
+  markCompleted(jobId: string, version: number): Promise<SchedulerJobRecord | null>;
+  markFailed(jobId: string, version: number, error: Error, retryable: boolean): Promise<SchedulerJobRecord | null>;
+  markDeadLetter(jobId: string, version: number, error: Error): Promise<SchedulerJobRecord | null>;
   markCancelled(jobId: string): Promise<SchedulerJobRecord | null>;
   markExpired(jobId: string): Promise<SchedulerJobRecord | null>;
-  findReconcileCandidates(staleRunningAfterMs: number): Promise<SchedulerJobRecord[]>;
+  findReconcileCandidates(staleRunningAfterMs: number, limit: number): Promise<SchedulerJobRecord[]>;
   getByJobId(jobId: string): Promise<SchedulerJobRecord | null>;
   list(filter?: ListJobsFilter): Promise<SchedulerJobRecord[]>;
 }
 
+export type StorageAdapter = SchedulerStore;
+
 export interface SchedulerQueue {
-  enqueue(record: SchedulerJobRecord, options: JobOptions): Promise<{ jobId: string }>;
-  remove(jobId: string): Promise<boolean>;
-  get(jobId: string): Promise<unknown | null>;
+  enqueue(record: SchedulerJobRecord, options: JobOptions): Promise<{ jobId: string; existing: boolean }>;
+  remove(bullJobId: string): Promise<boolean>;
+  get(bullJobId: string): Promise<unknown | null>;
   close(): Promise<void>;
 }

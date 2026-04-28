@@ -16,8 +16,20 @@ export function createBullMqQueue(config: BullMqQueueConfig): SchedulerQueue {
   return {
     async enqueue(record: SchedulerJobRecord, options: JobOptions) {
       const delay = getDelayMs(record.runAt);
+      const bullJobId = buildBullJobId(record);
+      const existing = await queue.getJob(bullJobId);
+
+      if (existing) {
+        const state = await existing.getState().catch(() => 'unknown');
+        if (!['completed', 'failed'].includes(state)) {
+          return { jobId: String(existing.id), existing: true };
+        }
+
+        await existing.remove().catch(() => undefined);
+      }
+
       const bullOptions: JobsOptions = {
-        jobId: record.jobId,
+        jobId: bullJobId,
         delay,
         attempts: options.attempts ?? record.attempts,
         backoff: (options.backoff ?? record.backoff) as JobsOptions['backoff'],
@@ -31,13 +43,14 @@ export function createBullMqQueue(config: BullMqQueueConfig): SchedulerQueue {
           ...record.payload,
           _lazyScheduler: {
             jobId: record.jobId,
+            version: record.version,
             runAt: record.runAt.toISOString(),
           },
         },
         bullOptions
       );
 
-      return { jobId: String(job.id) };
+      return { jobId: String(job.id), existing: false };
     },
 
     async remove(jobId) {
@@ -55,4 +68,8 @@ export function createBullMqQueue(config: BullMqQueueConfig): SchedulerQueue {
       return queue.close();
     },
   };
+}
+
+function buildBullJobId(record: SchedulerJobRecord): string {
+  return `${record.jobId}:v${record.version}`;
 }
