@@ -56,4 +56,3 @@ This package currently contains the compile-safe skeleton and module boundaries 
 - Mongo schedule ledger
 - startup reconciliation
 
-The next pass should integrate it into `scheduler-server/src` and harden behavior with tests.

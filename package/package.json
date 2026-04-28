@@ -1,7 +1,36 @@
 {
-  "name": "lazy-scheduler",
+  "name": "bullmq-lazy-scheduler",
   "version": "0.1.0",
-  "description": "Mongo-backed lazy scheduler built on BullMQ and Redis.",
+  "description": "Distributed job scheduler built with BullMQ, Redis, and MongoDB. Supports delayed jobs, lazy execution, and scalable background processing.",
+  "keywords": [
+    "bullmq",
+    "scheduler",
+    "job-scheduler",
+    "task-scheduler",
+    "redis",
+    "mongodb",
+    "mongoose",
+    "job-queue",
+    "task-queue",
+    "background-jobs",
+    "delayed-jobs",
+    "queue",
+    "nodejs",
+    "typescript",
+    "bullmq scheduler",
+    "redis scheduler",
+    "mongodb scheduler"
+  ],
+  "homepage": "https://github.com/Amon20044/bullmq-lazy-scheduler#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Amon20044/bullmq-lazy-scheduler.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Amon20044/bullmq-lazy-scheduler/issues"
+  },
+  "license": "MIT",
+  "author": "Amon Sharma",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -19,5 +48,11 @@
   },
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
