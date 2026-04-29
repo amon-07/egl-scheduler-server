@@ -71,5 +71,9 @@ export function createBullMqQueue(config: BullMqQueueConfig): SchedulerQueue {
 }
 
 function buildBullJobId(record: SchedulerJobRecord): string {
-  return `${record.jobId}:v${record.version}`;
+  return `ls-${toBullSafeId(record.jobId)}-v-${record.version}`;
+}
+
+function toBullSafeId(value: string): string {
+  return Buffer.from(value).toString('base64url');
 }

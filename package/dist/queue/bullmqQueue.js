@@ -53,6 +53,9 @@ function createBullMqQueue(config) {
     };
 }
 function buildBullJobId(record) {
-    return `${record.jobId}:v${record.version}`;
+    return `ls-${toBullSafeId(record.jobId)}-v-${record.version}`;
+}
+function toBullSafeId(value) {
+    return Buffer.from(value).toString('base64url');
 }
 //# sourceMappingURL=bullmqQueue.js.map
