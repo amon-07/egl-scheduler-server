@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const scheduler = require('../core/scheduler');
+const scheduler = require('../scheduler');
 const log = require('../utils/logger');
 
 const TAG = 'jobs';

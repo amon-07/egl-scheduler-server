@@ -9,6 +9,8 @@ export type {
   RegisterJobInput,
   ScheduleJobInput,
   ScheduleJobResult,
+  ScheduleRecurringInput,
+  ScheduleRecurringResult,
   SchedulerJobRecord,
   SchedulerJobStatus,
   StorageAdapter,

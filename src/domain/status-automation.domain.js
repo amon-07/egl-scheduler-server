@@ -1,7 +1,7 @@
 const Tournament = require('../models/tournament.model');
 const Stage = require('../models/stage.model');
 const StageRegistration = require('../models/stage-registration.model');
-const scheduler = require('../core/scheduler');
+const scheduler = require('../scheduler');
 const cacheInvalidation = require('../utils/cache-invalidation.utils');
 const log = require('../utils/logger');
 const {

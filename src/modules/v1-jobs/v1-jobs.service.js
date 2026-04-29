@@ -1,4 +1,4 @@
-const scheduler = require('../../core/scheduler');
+const scheduler = require('../../scheduler');
 
 const Tournament = require('../../models/tournament.model');
 const Stage = require('../../models/stage.model');

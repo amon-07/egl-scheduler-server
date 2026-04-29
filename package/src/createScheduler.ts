@@ -2,6 +2,7 @@ import os from 'node:os';
 import type { LazyScheduler, LazySchedulerConfig, SchedulerDefaults } from './types';
 import { createRegistry } from './registry/registry';
 import { scheduleJob } from './scheduler/schedule';
+import { RECURRING_META_KEY, scheduleRecurringJob } from './scheduler/recurring';
 import { cancelJob } from './scheduler/cancel';
 import { getJob } from './scheduler/get';
 import { listJobs } from './scheduler/list';
@@ -55,7 +56,43 @@ export function createScheduler(config: LazySchedulerConfig): LazyScheduler {
   });
 
   return {
-    register: registry.register,
+    register(input) {
+      registry.register({
+        ...input,
+        handler: async (payload, context) => {
+          const recurring = payload[RECURRING_META_KEY] as {
+            jobId?: string;
+            pattern?: string;
+            tz?: string;
+            payload?: Record<string, unknown>;
+          } | undefined;
+          const { [RECURRING_META_KEY]: _ignored, ...handlerPayload } = payload;
+          const result = await input.handler(handlerPayload, context);
+
+          if (recurring?.jobId && recurring.pattern) {
+            scheduleRecurringJob({ registry, store, queue, defaults }, {
+              name: input.name,
+              jobId: recurring.jobId,
+              payload: recurring.payload ?? handlerPayload,
+              pattern: recurring.pattern,
+              tz: recurring.tz,
+            }).catch((error) => {
+              logger.error('lazy-scheduler:recurring', 'Failed to schedule next recurring run', {
+                jobName: input.name,
+                jobId: recurring.jobId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          }
+
+          return result;
+        },
+      });
+    },
+
+    listRegistered() {
+      return registry.list();
+    },
 
     async start() {
       await worker.start();
@@ -67,6 +104,10 @@ export function createScheduler(config: LazySchedulerConfig): LazyScheduler {
 
     schedule(input) {
       return scheduleJob({ registry, store, queue, defaults }, input);
+    },
+
+    scheduleRecurring(input) {
+      return scheduleRecurringJob({ registry, store, queue, defaults }, input);
     },
 
     cancel(jobId) {

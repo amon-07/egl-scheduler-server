@@ -72,6 +72,31 @@ export interface ScheduleJobResult {
   record: SchedulerJobRecord;
 }
 
+export interface ScheduleRecurringInput<TPayload extends JsonObject = JsonObject> {
+  name: string;
+  jobId: string;
+  payload: TPayload;
+  pattern: string;
+  tz?: string;
+  ttlMs?: number;
+  attempts?: number;
+  backoff?: BackoffOptions;
+  replaceExisting?: boolean;
+  createdBy?: string | null;
+  metadata?: JsonObject;
+}
+
+export interface ScheduleRecurringResult {
+  status: 'ok';
+  action: ScheduleJobResult['action'];
+  jobId: string;
+  name: string;
+  pattern: string;
+  tz?: string;
+  nextRunAt: string;
+  delayMs: number;
+}
+
 export interface SchedulerJobRecord<TPayload extends JsonObject = JsonObject> {
   jobId: string;
   version: number;
@@ -129,9 +154,11 @@ export interface LazySchedulerConfig {
 
 export interface LazyScheduler {
   register(input: RegisterJobInput): void;
+  listRegistered(): string[];
   start(): Promise<void>;
   reconcile(): Promise<ReconcileResult>;
   schedule(input: ScheduleJobInput): Promise<ScheduleJobResult>;
+  scheduleRecurring(input: ScheduleRecurringInput): Promise<ScheduleRecurringResult>;
   cancel(jobId: string): Promise<{ status: 'ok'; cancelled: boolean; jobId: string }>;
   get(jobId: string): Promise<SchedulerJobRecord | null>;
   list(filter?: ListJobsFilter): Promise<SchedulerJobRecord[]>;

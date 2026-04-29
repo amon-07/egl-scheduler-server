@@ -7,7 +7,7 @@ const express = require('express');
 const { connectDB } = require('./config/db.config');
 
 const { loadAll } = require('./jobs');
-const scheduler = require('./core/scheduler');
+const scheduler = require('./scheduler');
 const { shutdownCacheInvalidation } = require('./utils/cache-invalidation.utils');
 const { ensureRecurringSchedules } = require('./bootstrap/recurring-jobs.bootstrap');
 const log = require('./utils/logger');
