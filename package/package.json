@@ -1,6 +1,6 @@
 {
   "name": "bullmq-lazy-scheduler",
-  "version": "0.1.0",
+  "version": "0.1.1a",
   "description": "Distributed job scheduler built with BullMQ, Redis, and MongoDB. Supports delayed jobs, lazy execution, and scalable background processing.",
   "keywords": [
     "bullmq",

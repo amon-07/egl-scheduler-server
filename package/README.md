@@ -1,4 +1,4 @@
-# lazy-scheduler
+# bullmq-lazy-scheduler
 
 Durable delayed-job scheduler for Node.js, built on BullMQ/Redis for execution and a pluggable persistence adapter for schedule state.
 
@@ -6,7 +6,7 @@ Status: alpha. APIs may change while the package is being integrated and hardene
 
 ## Why
 
-BullMQ is fast and production-proven, but Redis should not be the only source of truth for long-lived schedule intent. `lazy-scheduler` keeps durable job state in a storage adapter and uses BullMQ as the execution layer.
+BullMQ is fast and production-proven, but Redis should not be the only source of truth for long-lived schedule intent. `bullmq-lazy-scheduler` keeps durable job state in a storage adapter and uses BullMQ as the execution layer.
 
 The default adapter is MongoDB, but the scheduler core can use any storage backend that implements the adapter contract.
 
@@ -21,7 +21,7 @@ The default adapter is MongoDB, but the scheduler core can use any storage backe
 ## Installation
 
 ```bash
-npm install lazy-scheduler
+npm install bullmq-lazy-scheduler
 ```
 
 Peer dependencies:
@@ -33,7 +33,7 @@ npm install bullmq ioredis mongoose
 ## Quick Start
 
 ```ts
-import { createMongoAdapter, createScheduler } from 'lazy-scheduler';
+import { createMongoAdapter, createScheduler } from 'bullmq-lazy-scheduler';
 
 const scheduler = createScheduler({
   queueName: 'scheduler',
@@ -126,7 +126,7 @@ Many jobs can share one `name`. Each scheduled job should have its own determini
 MongoDB is built in:
 
 ```ts
-import { createMongoAdapter, createScheduler } from 'lazy-scheduler';
+import { createMongoAdapter, createScheduler } from 'bullmq-lazy-scheduler';
 
 const scheduler = createScheduler({
   queueName: 'scheduler',
@@ -148,7 +148,7 @@ const scheduler = createScheduler({
 Custom adapters can target PostgreSQL, MySQL, DynamoDB, or another store:
 
 ```ts
-import { defineStorageAdapter } from 'lazy-scheduler';
+import { defineStorageAdapter } from 'bullmq-lazy-scheduler';
 
 const postgresStore = defineStorageAdapter({
   upsertScheduledJob: async (input, options) => {},

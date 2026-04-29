@@ -1,133 +1,201 @@
-/**
- * Scheduler — wrapper around the BullMQ queue.
- *
- * Exposes: schedule (delayed, upsert by jobId), scheduleRecurring (cron),
- * cancel, get, list. That's all the project needs.
- */
-
-const { Queue } = require('bullmq');
+const mongoose = require('mongoose');
+const cronParser = require('cron-parser');
+const { createMongoAdapter, createScheduler } = require('bullmq-lazy-scheduler');
 const { redisConnection } = require('../config/redis.config');
-const registry = require('./registry');
 const log = require('../utils/logger');
 
-const TAG = 'scheduler';
+const QUEUE_NAME = process.env.SCHEDULER_QUEUE_NAME || 'scheduler';
+const registeredJobs = new Set();
 
-const QUEUE_NAME = 'scheduler';
+let scheduler = null;
 
-const queue = new Queue(QUEUE_NAME, {
-  connection: redisConnection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: { type: 'exponential', delay: 3000 },
-    removeOnComplete: { count: 500 },
-    removeOnFail: { count: 1000 },
-  },
-});
+function getScheduler() {
+  if (scheduler) return scheduler;
 
-function toDate(runAt) {
-  if (runAt instanceof Date) return runAt;
-  if (typeof runAt === 'number') return new Date(runAt);
-  const d = new Date(String(runAt));
-  if (Number.isNaN(d.getTime())) {
-    throw new Error(`Invalid runAt value: ${runAt}`);
-  }
-  return d;
-}
-
-async function schedule(name, data, runAt, { jobId } = {}) {
-  if (!registry.has(name)) {
-    throw new Error(`Unknown job type: "${name}"`);
-  }
-
-  const fireAt = toDate(runAt);
-  const delayMs = Math.max(fireAt.getTime() - Date.now(), 0);
-
-  // Upsert: replace any existing job with this id so reschedules take effect.
-  let replaced = false;
-  if (jobId) {
-    const existing = await queue.getJob(jobId);
-    if (existing) {
-      const prevState = await existing.getState().catch(() => 'unknown');
-      await existing.remove();
-      replaced = true;
-      log.info(TAG, `Replaced existing job`, { jobId, previousState: prevState });
-    }
-  }
-
-  const { options = {} } = registry.get(name);
-  const job = await queue.add(name, {
-    ...data,
-    _meta: { scheduledFor: fireAt.toISOString() },
-  }, {
-    ...options,
-    delay: delayMs,
-    ...(jobId ? { jobId } : {}),
+  scheduler = createScheduler({
+    queueName: QUEUE_NAME,
+    redisConnection,
+    store: createMongoAdapter({ mongoose }),
+    logger: log,
+    worker: { concurrency: resolveWorkerConcurrency() },
+    defaults: {
+      attempts: Number(process.env.SCHEDULER_DEFAULT_ATTEMPTS || 3),
+      backoff: { type: 'exponential', delay: Number(process.env.SCHEDULER_BACKOFF_MS || 3000) },
+      staleRunningAfterMs: Number(process.env.SCHEDULER_STALE_RUNNING_MS || 10 * 60 * 1000),
+      deadLetterOnExhausted: process.env.SCHEDULER_DEAD_LETTER_ON_EXHAUSTED !== 'false',
+      reconcileBatchSize: Number(process.env.SCHEDULER_RECONCILE_BATCH_SIZE || 1000),
+    },
+    locks: {
+      keyPrefix: QUEUE_NAME,
+      ttlMs: Number(process.env.SCHEDULER_RECONCILE_LOCK_TTL_MS || 30000),
+      instanceId: process.env.SCHEDULER_INSTANCE_ID,
+    },
   });
 
-  const verb = replaced ? 'rescheduled' : 'scheduled';
-  log.info(TAG, `Job ${verb}: "${name}"`, { jobId: job.id, firesAt: fireAt.toISOString(), delayMs });
-  return { jobId: job.id, name, scheduledFor: fireAt.toISOString(), delayMs, replaced };
+  return scheduler;
 }
 
-async function scheduleRecurring(name, data, { pattern, tz = 'Asia/Kolkata' }, { jobId } = {}) {
-  if (!registry.has(name)) {
-    throw new Error(`Unknown job type: "${name}"`);
-  }
-  if (!pattern) throw new Error('recurring pattern is required');
-  if (!jobId) throw new Error('recurring jobId is required');
+function resolveWorkerConcurrency() {
+  const value = process.env.SCHEDULER_WORKER_CONCURRENCY;
+  if (!value || value === 'auto') return 'auto';
 
-  await queue.upsertJobScheduler(jobId, { pattern, tz }, { name, data });
-  log.info(TAG, `Recurring job upserted: "${name}"`, { jobId, pattern, tz });
-  return { jobId, name, pattern, tz };
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 'auto';
 }
 
-async function cancel(jobId) {
-  const job = await queue.getJob(jobId);
-  if (!job) return false;
-  await job.remove();
-  log.info(TAG, 'Job cancelled', { jobId });
-  return true;
+function register(jobDef) {
+  const instance = getScheduler();
+  instance.register({
+    name: jobDef.name,
+    defaultOptions: jobDef.options,
+    handler: async (payload = {}, context) => {
+      const { __recurring, ...jobPayload } = payload;
+      const result = await jobDef.handler(jobPayload, context);
+
+      if (__recurring) {
+        scheduleRecurring(
+          jobDef.name,
+          __recurring.payload || jobPayload,
+          { pattern: __recurring.pattern, tz: __recurring.tz },
+          { jobId: __recurring.jobId }
+        ).catch((error) => {
+          log.error('scheduler:recurring', 'Failed to schedule next recurring run', {
+            jobName: jobDef.name,
+            jobId: __recurring.jobId,
+            error: error.message,
+          });
+        });
+      }
+
+      return result;
+    },
+  });
+
+  registeredJobs.add(jobDef.name);
 }
 
-async function get(jobId) {
-  const job = await queue.getJob(jobId);
-  if (!job) return null;
-  const state = await job.getState();
+async function start() {
+  await getScheduler().start();
+  log.info('scheduler', 'Worker started', {
+    queueName: QUEUE_NAME,
+    registeredJobs: listRegistered(),
+  });
+}
+
+async function reconcile() {
+  const result = await getScheduler().reconcile();
+  log.info('scheduler', 'Reconcile finished', result);
+  return result;
+}
+
+async function schedule(name, payload, runAt, options = {}) {
+  const result = await getScheduler().schedule({
+    name,
+    jobId: options.jobId || `${name}-${Date.now()}`,
+    payload: payload || {},
+    runAt,
+    attempts: options.attempts,
+    backoff: options.backoff,
+    ttlMs: options.ttlMs,
+    replaceExisting: options.replaceExisting,
+  });
+
+  log.info('scheduler', 'Job scheduled', {
+    jobId: result.jobId,
+    name,
+    runAt: result.runAt,
+    delayMs: result.delayMs,
+    action: result.action,
+  });
+
   return {
-    id: job.id,
-    name: job.name,
-    data: job.data,
-    state,
-    attemptsMade: job.attemptsMade,
-    scheduledFor: job.data?._meta?.scheduledFor || null,
-    delay: job.delay || 0,
+    jobId: result.jobId,
+    name,
+    scheduledFor: result.runAt,
+    delayMs: result.delayMs,
+    replaced: result.action === 'rescheduled',
+    action: result.action,
   };
 }
 
-async function list() {
-  const [delayed, waiting] = await Promise.all([
-    queue.getDelayed(),
-    queue.getWaiting(),
-  ]);
-  return [...delayed, ...waiting].map((j) => ({
-    id: j.id,
-    name: j.name,
-    data: j.data,
-    scheduledFor: j.data?._meta?.scheduledFor || null,
-    state: j.delay > 0 ? 'delayed' : 'waiting',
-  }));
+async function scheduleRecurring(name, payload, repeat, options = {}) {
+  if (!repeat?.pattern) throw new Error('recurring pattern is required');
+  if (!options.jobId) throw new Error('recurring jobId is required');
+
+  const runAt = getNextCronRunAt(repeat.pattern, repeat.tz);
+  const result = await schedule(
+    name,
+    {
+      ...(payload || {}),
+      __recurring: {
+        jobId: options.jobId,
+        pattern: repeat.pattern,
+        tz: repeat.tz,
+        payload: payload || {},
+      },
+    },
+    runAt,
+    { ...options, jobId: options.jobId }
+  );
+
+  return {
+    jobId: options.jobId,
+    name,
+    pattern: repeat.pattern,
+    tz: repeat.tz,
+    nextRunAt: result.scheduledFor,
+  };
+}
+
+function getNextCronRunAt(pattern, tz) {
+  return cronParser
+    .parseExpression(pattern, {
+      tz,
+      currentDate: new Date(Date.now() + 1000),
+    })
+    .next()
+    .toDate()
+    .toISOString();
+}
+
+async function cancel(jobId) {
+  const result = await getScheduler().cancel(jobId);
+  return result.cancelled;
+}
+
+function get(jobId) {
+  return getScheduler().get(jobId);
+}
+
+function list(filter) {
+  return getScheduler().list(filter);
+}
+
+function listDeadLetters(filter) {
+  return getScheduler().listDeadLetters(filter);
 }
 
 async function shutdown() {
-  await queue.close();
+  if (!scheduler) return;
+  await scheduler.shutdown();
+  scheduler = null;
+}
+
+function listRegistered() {
+  return [...registeredJobs];
 }
 
 module.exports = {
+  QUEUE_NAME,
+  register,
+  start,
+  reconcile,
   schedule,
   scheduleRecurring,
   cancel,
   get,
   list,
+  listDeadLetters,
   shutdown,
-  QUEUE_NAME,
+  listRegistered,
 };

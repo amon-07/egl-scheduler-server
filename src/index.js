@@ -7,9 +7,7 @@ const express = require('express');
 const { connectDB } = require('./config/db.config');
 
 const { loadAll } = require('./jobs');
-const worker = require('./core/worker');
 const scheduler = require('./core/scheduler');
-const registry = require('./core/registry');
 const { shutdownCacheInvalidation } = require('./utils/cache-invalidation.utils');
 const { ensureRecurringSchedules } = require('./bootstrap/recurring-jobs.bootstrap');
 const log = require('./utils/logger');
@@ -30,7 +28,7 @@ app.get('/health', (_req, res) => {
     status: true,
     data: {
       uptime: process.uptime(),
-      registeredJobs: registry.listRegistered(),
+      registeredJobs: scheduler.listRegistered(),
     },
   });
 });
@@ -44,15 +42,15 @@ let server = null;
 async function bootstrap() {
   await connectDB();
   loadAll();
-  worker.start();
-
-  ensureRecurringSchedules().catch((err) => {
+  await scheduler.start();
+  await scheduler.reconcile();
+  await ensureRecurringSchedules().catch((err) => {
     log.error('scheduler:recurring', 'Recurring job setup failed', { error: err.message });
   });
 
   server = app.listen(PORT, () => {
     log.info('scheduler', `Server running on port ${PORT}`, {
-      registeredJobs: registry.listRegistered(),
+      registeredJobs: scheduler.listRegistered(),
     });
   });
 }
@@ -60,7 +58,6 @@ async function bootstrap() {
 async function gracefulShutdown() {
   log.info('scheduler', 'Shutting down...');
   if (server) await new Promise((resolve) => server.close(resolve));
-  await worker.stop();
   await scheduler.shutdown();
   await shutdownCacheInvalidation();
   log.info('scheduler', 'Shutdown complete');

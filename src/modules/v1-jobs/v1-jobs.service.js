@@ -15,24 +15,11 @@ function normalizeRunAt(runAt) {
 
 async function scheduleDeterministicJob({ jobName, jobId, payload, runAt }) {
   const normalizedRunAt = normalizeRunAt(runAt);
-  const delayMs = new Date(normalizedRunAt).getTime() - Date.now();
-
-  if (delayMs <= 0) {
-    const cancelled = await scheduler.cancel(jobId);
-    return {
-      status: 'ok',
-      action: 'cancelled_negative_delay',
-      jobId,
-      runAt: normalizedRunAt,
-      delayMs,
-      cancelled,
-    };
-  }
-
   const result = await scheduler.schedule(jobName, payload, normalizedRunAt, { jobId });
+
   return {
     status: 'ok',
-    action: 'scheduled',
+    action: result.action || 'scheduled',
     jobId: result.jobId,
     runAt: result.scheduledFor,
     delayMs: result.delayMs,
@@ -131,8 +118,8 @@ function createV1JobsService() {
     function summarize(results) {
       return results.reduce((acc, item) => {
         if (item.status === 'fulfilled') {
-          if (item.value?.action === 'scheduled') acc.scheduled += 1;
-          if (item.value?.action === 'cancelled_negative_delay') acc.cancelled += 1;
+          if (['scheduled', 'rescheduled', 'queued_immediately'].includes(item.value?.action)) acc.scheduled += 1;
+          if (item.value?.action?.startsWith?.('cancelled')) acc.cancelled += 1;
         } else {
           acc.failed += 1;
         }
