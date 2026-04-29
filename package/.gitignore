@@ -70,4 +70,3 @@ docker-data/
 *.pid
 *.seed
 *.out
-/dist/

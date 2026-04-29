@@ -37,6 +37,11 @@ function parseConcurrency(value) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 'auto';
 }
 
+function parseCsvEnv(value) {
+  if (!value) return [];
+  return String(value).split(',').map((item) => item.trim()).filter(Boolean);
+}
+
 function register(jobDef) {
   instance().register({
     name: jobDef.name,
@@ -81,6 +86,38 @@ function scheduleRecurring(name, payload, repeat, options = {}) {
   });
 }
 
+async function ensureRecurringSchedules() {
+  const enabled = String(process.env.SCHEDULER_ENABLE_RECURRING || 'true').toLowerCase() === 'true';
+  if (!enabled) {
+    log.info('scheduler:recurring', 'Recurring jobs disabled');
+    return;
+  }
+
+  const tz = process.env.SCHEDULER_RECURRING_TZ || 'Asia/Kolkata';
+  const potmCron = process.env.SCHEDULER_POTM_CRON || '0 1 1 * *';
+  const globalCron = process.env.SCHEDULER_GLOBAL_LEADERBOARD_CRON || '0 1 * * 0';
+
+  for (const gameId of parseCsvEnv(process.env.SCHEDULER_POTM_GAME_IDS)) {
+    await scheduleRecurring(
+      'potm:recalculate',
+      { gameId, month: null, year: null, adminId: null },
+      { pattern: potmCron, tz },
+      { jobId: `repeat-potm-${gameId}` }
+    );
+    log.info('scheduler:recurring', 'POTM recurring registered', { gameId, cron: potmCron, tz });
+  }
+
+  for (const gameId of parseCsvEnv(process.env.SCHEDULER_GLOBAL_LEADERBOARD_GAME_IDS)) {
+    await scheduleRecurring(
+      'leaderboard:global-recalculate',
+      { gameId, participantType: 'Team', adminId: null, useCustomConfig: false },
+      { pattern: globalCron, tz },
+      { jobId: `repeat-leaderboard-${gameId}` }
+    );
+    log.info('scheduler:recurring', 'Global leaderboard recurring registered', { gameId, cron: globalCron, tz });
+  }
+}
+
 async function cancel(jobId) {
   const result = await instance().cancel(jobId);
   return result.cancelled;
@@ -98,6 +135,7 @@ module.exports = {
   reconcile: () => instance().reconcile(),
   schedule,
   scheduleRecurring,
+  ensureRecurringSchedules,
   cancel,
   get: (jobId) => instance().get(jobId),
   list: (filter) => instance().list(filter),

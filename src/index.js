@@ -9,7 +9,6 @@ const { connectDB } = require('./config/db.config');
 const { loadAll } = require('./jobs');
 const scheduler = require('./scheduler');
 const { shutdownCacheInvalidation } = require('./utils/cache-invalidation.utils');
-const { ensureRecurringSchedules } = require('./bootstrap/recurring-jobs.bootstrap');
 const log = require('./utils/logger');
 const { requestLogger } = require('./middleware/request-logger.middleware');
 
@@ -44,7 +43,7 @@ async function bootstrap() {
   loadAll();
   await scheduler.start();
   await scheduler.reconcile();
-  await ensureRecurringSchedules().catch((err) => {
+  await scheduler.ensureRecurringSchedules().catch((err) => {
     log.error('scheduler:recurring', 'Recurring job setup failed', { error: err.message });
   });
 
