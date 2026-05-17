@@ -1,7 +1,16 @@
 const Redis = require('ioredis');
 const { redisConnection } = require('../config/redis.config');
 
-const INVALIDATION_CHANNEL = process.env.HYBRID_CACHE_INVALIDATION_CHANNEL || 'hybridcache:invalidation';
+const DEFAULT_INVALIDATION_CHANNEL = 'lazylayerscache:invalidation';
+const LEGACY_INVALIDATION_CHANNEL = 'hybridcache:invalidation';
+
+function invalidationChannelName(channel) {
+  const trimmed = channel == null ? '' : String(channel).trim();
+  if (!trimmed || trimmed === LEGACY_INVALIDATION_CHANNEL) return DEFAULT_INVALIDATION_CHANNEL;
+  return trimmed;
+}
+
+const INVALIDATION_CHANNEL = invalidationChannelName(process.env.HYBRID_CACHE_INVALIDATION_CHANNEL);
 const SOURCE_ID = `scheduler-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
 const RETRY_INTERVAL_MS = 5000;
 const RETRY_MAX_DELAY_MS = 60000;
